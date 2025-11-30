@@ -1,0 +1,26 @@
+body {
+    font-family: Arial;
+    background: #f6f6f6;
+    margin: 0;
+}
+
+header {
+    background: black;
+    color: white;
+    padding: 25px;
+    text-align: center;
+}
+
+#search-box {
+    text-align: center;
+    padding: 20px;
+}
+
+.event {
+    background: white;
+    padding: 20px;
+    margin: 20px auto;
+    width: 60%;
+    border-radius: 8px;
+    box-shadow: 0 0 4px rgba(0,0,0,0.1);
+}
