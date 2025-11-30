@@ -1,79 +1,113 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from backend.ai.query_expand import generate_urls
-from backend.collectors.generic_scraper import fetch_page
-from backend.ai.extract_event import extract_event
-from backend.ai.score_event import score_event
+from backend.ai.search_engine import smart_event_search
+from backend.storage.rules import load_rules
+from backend.storage.pins import load_pins, save_pin, delete_pin
+from backend.storage.notes import load_notes, add_note
 
-
-# --------------------------------------------------------
-# 1) Create FastAPI app FIRST
-# --------------------------------------------------------
 app = FastAPI()
 
-# --------------------------------------------------------
-# 2) Add CORS middleware AFTER app exists
-# --------------------------------------------------------
+# -------------------------------------------------------
+# CORS CONFIG
+# -------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],      # allow everything or restrict to your domain
+    allow_origins=["*"], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# --------------------------------------------------------
-# 3) Models
-# --------------------------------------------------------
+# -------------------------------------------------------
+# MODELS
+# -------------------------------------------------------
 class SearchPayload(BaseModel):
-    keywords: str
-    region: str
+    prompt: str
+    region: str | None = None
 
 
-# --------------------------------------------------------
-# 4) Simple home route to confirm backend is alive
-# --------------------------------------------------------
+class PinPayload(BaseModel):
+    event: dict
+
+
+class NotePayload(BaseModel):
+    text: str
+
+
+# -------------------------------------------------------
+# HOME ROUTE
+# -------------------------------------------------------
 @app.get("/", response_class=HTMLResponse)
 async def home():
     return """
-    <html>
-    <head><title>PopFinder API</title></head>
-    <body style="font-family: Arial; padding: 20px;">
-        <h2>PopFinder Backend is running ✔</h2>
-        <p>Visit <a href='/docs'>/docs</a> for the API explorer.</p>
-    </body>
-    </html>
+    <html><body style="font-family:Arial;padding:20px">
+        <h2>PopFinder Backend Running ✔</h2>
+        <p>Visit <a href='/docs'>/docs</a></p>
+    </body></html>
     """
 
 
-# --------------------------------------------------------
-# 5) Search endpoint
-# --------------------------------------------------------
+# -------------------------------------------------------
+# MAIN SEARCH
+# -------------------------------------------------------
 @app.post("/search")
 async def search(payload: SearchPayload):
-    keywords = payload.keywords
-    region = payload.region
 
-    urls = generate_urls(keywords, region)
-    results = []
+    rules = load_rules()
+    pins = load_pins()
+    notes = load_notes()
 
-    for url in urls:
-        text = fetch_page(url)
-        if not text:
-            continue
-
-        extracted_events = extract_event(text, url)
-        if not extracted_events:
-            continue
-
-        for ev in extracted_events:
-            ev["url"] = url
-            results.append(score_event(ev))
-
-    # Sort events by score
-    results.sort(key=lambda x: x.get("score", 0), reverse=True)
+    results = smart_event_search(
+        user_prompt=payload.prompt,
+        region=payload.region,
+        rules=rules,
+        pins=pins,
+        notes=notes
+    )
 
     return results
+
+
+# -------------------------------------------------------
+# PINNED EVENTS
+# -------------------------------------------------------
+@app.get("/pins")
+async def get_pins():
+    return load_pins()
+
+
+@app.post("/pin")
+async def pin_event(data: PinPayload):
+    save_pin(data.event)
+    return {"status": "pinned"}
+
+
+@app.delete("/pin")
+async def remove_pin(data: PinPayload):
+    delete_pin(data.event)
+    return {"status": "removed"}
+
+
+# -------------------------------------------------------
+# NOTES
+# -------------------------------------------------------
+@app.get("/notes")
+async def get_notes():
+    return load_notes()
+
+
+@app.post("/notes")
+async def add_new_note(data: NotePayload):
+    add_note(data.text)
+    return {"status": "saved"}
+
+
+# -------------------------------------------------------
+# OPTIONAL: VIEW RULES.TXT
+# -------------------------------------------------------
+@app.get("/rules")
+async def get_rules():
+    return {"rules": load_rules()}
