@@ -1,4 +1,14 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],   # allow all origins (or replace with your domain)
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
@@ -55,3 +65,4 @@ async def search(payload: SearchPayload):
     results.sort(key=lambda x: x.get("score", 0), reverse=True)
 
     return results
+
