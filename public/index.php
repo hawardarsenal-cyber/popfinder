@@ -1,45 +1,25 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Pop-Up Opportunity Finder</title>
-    <link rel="stylesheet" href="assets/css/style.css">
+    <meta charset="UTF-8">
+    <title>PopFinder – Event & Pop-Up Locator</title>
+    <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
+    <header>
+        <h1>PopFinder</h1>
+        <p>Discover events, pop-up ideas, and vibrant locations across the city.</p>
+    </header>
 
-<h1>Pop-Up Opportunity Finder</h1>
+    <section id="search-box">
+        <input type="text" id="keywords" placeholder="What are you looking for? e.g. markets, festivals">
+        <input type="text" id="region" placeholder="Region e.g. London">
+        <button onclick="runSearch()">Search</button>
+    </section>
 
-<div class="search-block">
-    <label>Search Keywords:</label>
-    <input id="keywords" type="text" placeholder="markets, fairs, exhibitions...">
+    <section id="results"></section>
 
-    <label>Choose region:</label>
-    <select id="region">
-        <option value="London">London (Default)</option>
-        <option value="Kent">Kent</option>
-        <option value="Other">Other UK Region</option>
-    </select>
-
-    <button onclick="runSearch()">Search</button>
-</div>
-
-<hr>
-
-<h2>Results</h2>
-<div id="results"></div>
-
-<hr>
-
-<h2>Pinned Opportunities</h2>
-<div id="pinned"></div>
-
-<hr>
-
-<h2>Notes</h2>
-<textarea id="newNote" placeholder="Write a note..."></textarea><br>
-<button onclick="saveNote()">Save Note</button>
-
-<div id="notes"></div>
-
-<script src="assets/js/app.js"></script>
+    <script src="app.js"></script>
 </body>
 </html>
