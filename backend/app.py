@@ -1,113 +1,114 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
+import json
+import os
 
 from backend.ai.search_engine import smart_event_search
-from backend.storage.rules import load_rules
-from backend.storage.pins import load_pins, save_pin, delete_pin
-from backend.storage.notes import load_notes, add_note
 
+# -----------------------------------------------------------
+# FILE PATHS
+# -----------------------------------------------------------
+DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+RULES_FILE = os.path.join(DATA_DIR, "rules.txt")
+NOTES_FILE = os.path.join(DATA_DIR, "notes.txt")
+PINS_FILE = os.path.join(DATA_DIR, "pins.json")
+
+# -----------------------------------------------------------
+# FASTAPI APP
+# -----------------------------------------------------------
 app = FastAPI()
 
-# -------------------------------------------------------
-# CORS CONFIG
-# -------------------------------------------------------
+# CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# -------------------------------------------------------
+# -----------------------------------------------------------
 # MODELS
-# -------------------------------------------------------
+# -----------------------------------------------------------
 class SearchPayload(BaseModel):
-    prompt: str
-    region: str | None = None
-
+    region: str
+    keywords: str = ""
 
 class PinPayload(BaseModel):
-    event: dict
+    content: dict
 
+class NotesPayload(BaseModel):
+    text: str
 
-class NotePayload(BaseModel):
+class RulesUpdatePayload(BaseModel):
     text: str
 
 
-# -------------------------------------------------------
-# HOME ROUTE
-# -------------------------------------------------------
-@app.get("/", response_class=HTMLResponse)
-async def home():
-    return """
-    <html><body style="font-family:Arial;padding:20px">
-        <h2>PopFinder Backend Running ✔</h2>
-        <p>Visit <a href='/docs'>/docs</a></p>
-    </body></html>
-    """
+# -----------------------------------------------------------
+# ROUTES
+# -----------------------------------------------------------
+
+@app.get("/")
+def home():
+    return {"status": "PopFinder Backend Running"}
 
 
-# -------------------------------------------------------
-# MAIN SEARCH
-# -------------------------------------------------------
 @app.post("/search")
 async def search(payload: SearchPayload):
-
-    rules = load_rules()
-    pins = load_pins()
-    notes = load_notes()
-
-    results = smart_event_search(
-        user_prompt=payload.prompt,
-        region=payload.region,
-        rules=rules,
-        pins=pins,
-        notes=notes
-    )
-
-    return results
+    try:
+        events = smart_event_search(payload.region, payload.keywords)
+        return events
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-# -------------------------------------------------------
-# PINNED EVENTS
-# -------------------------------------------------------
-@app.get("/pins")
-async def get_pins():
-    return load_pins()
+@app.get("/rules")
+def get_rules():
+    with open(RULES_FILE, "r", encoding="utf-8") as f:
+        return {"rules": f.read()}
 
 
-@app.post("/pin")
-async def pin_event(data: PinPayload):
-    save_pin(data.event)
-    return {"status": "pinned"}
-
-
-@app.delete("/pin")
-async def remove_pin(data: PinPayload):
-    delete_pin(data.event)
-    return {"status": "removed"}
-
-
-# -------------------------------------------------------
-# NOTES
-# -------------------------------------------------------
-@app.get("/notes")
-async def get_notes():
-    return load_notes()
+@app.post("/rules/update")
+def update_rules(payload: RulesUpdatePayload):
+    with open(RULES_FILE, "w", encoding="utf-8") as f:
+        f.write(payload.text)
+    return {"status": "updated"}
 
 
 @app.post("/notes")
-async def add_new_note(data: NotePayload):
-    add_note(data.text)
+def save_notes(payload: NotesPayload):
+    with open(NOTES_FILE, "a", encoding="utf-8") as f:
+        f.write(payload.text + "\n\n")
     return {"status": "saved"}
 
 
-# -------------------------------------------------------
-# OPTIONAL: VIEW RULES.TXT
-# -------------------------------------------------------
-@app.get("/rules")
-async def get_rules():
-    return {"rules": load_rules()}
+@app.get("/notes")
+def read_notes():
+    with open(NOTES_FILE, "r", encoding="utf-8") as f:
+        return {"notes": f.read()}
+
+
+@app.post("/pin")
+def save_pin(payload: PinPayload):
+    try:
+        with open(PINS_FILE, "r", encoding="utf-8") as f:
+            pins = json.load(f)
+    except:
+        pins = []
+
+    pins.append(payload.content)
+
+    with open(PINS_FILE, "w", encoding="utf-8") as f:
+        json.dump(pins, f, indent=4)
+
+    return {"status": "pinned"}
+
+
+@app.get("/pins")
+def get_pins():
+    try:
+        with open(PINS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except:
+        return []
