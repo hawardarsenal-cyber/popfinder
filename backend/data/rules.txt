@@ -1,0 +1,4 @@
+Base rules for PopFinder:
+- Prioritize London and Kent
+- Focus on markets, events, festivals, fairs, brand activations, footfall opportunities
+- Provide diverse suggestions, not only websites
