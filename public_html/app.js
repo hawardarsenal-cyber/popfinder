@@ -1,51 +1,46 @@
-const API = "https://popfinder-backend-production.up.railway.app";
+document.getElementById("searchBtn").addEventListener("click", async () => {
+    const location = document.getElementById("locationSelect").value;
+    const keyword = document.getElementById("keywordInput").value;
 
-async function runSearch() {
-    const prompt = document.getElementById("prompt").value;
-    const region = document.getElementById("region").value;
+    const resultsBox = document.getElementById("results");
+    resultsBox.innerHTML = "Searching...";
 
-    document.getElementById("results").innerHTML = "Searching...";
+    try {
+        const response = await fetch("https://popfinder-backend-production.up.railway.app/search", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                location: location,
+                keyword: keyword
+            })
+        });
 
-    const res = await fetch(`${API}/search`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, region })
-    });
+        const data = await response.json();
 
-    const data = await res.json();
-    renderResults(data);
-}
+        if (!Array.isArray(data) || data.length === 0) {
+            resultsBox.innerHTML = "No results found.";
+            return;
+        }
 
-function renderResults(data) {
-    const box = document.getElementById("results");
-    box.innerHTML = "";
+        resultsBox.innerHTML = "";
+        data.forEach(ev => {
+            const div = document.createElement("div");
+            div.className = "event-card";
+            div.innerHTML = `
+                <h3>${ev.title || "Untitled Event"}</h3>
+                <p><strong>Date:</strong> ${ev.date || "Unknown"}</p>
+                <p><strong>Location:</strong> ${ev.location || "Unknown"}</p>
+                <p>${ev.description || "No description."}</p>
+                <a href="${ev.url}" target="_blank">Source</a>
+                <button class="pin-btn" data-event='${JSON.stringify(ev)}'>📌 Pin</button>
+            `;
+            resultsBox.appendChild(div);
+        });
 
-    if (!Array.isArray(data)) {
-        box.innerHTML = `<p>Error: ${data.error}</p>`;
-        return;
+    } catch (err) {
+        console.error(err);
+        resultsBox.innerHTML = "Error connecting to backend.";
     }
-
-    data.forEach(ev => {
-        const card = document.createElement("div");
-        card.className = "event";
-
-        card.innerHTML = `
-            <h3>${ev.title || "Untitled Event"}</h3>
-            <p><strong>Date:</strong> ${ev.date || "Unknown"}</p>
-            <p><strong>Location:</strong> ${ev.location || "Unknown"}</p>
-            <p>${ev.description || ""}</p>
-            <button onclick='pinEvent(${JSON.stringify(ev)})'>⭐ Pin</button>
-        `;
-
-        box.appendChild(card);
-    });
-}
-
-async function pinEvent(ev) {
-    await fetch(`${API}/pin`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ event: ev })
-    });
-    alert("Pinned!");
-}
+});
