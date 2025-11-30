@@ -1,14 +1,5 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],   # allow all origins (or replace with your domain)
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
@@ -18,28 +9,49 @@ from backend.ai.extract_event import extract_event
 from backend.ai.score_event import score_event
 
 
+# --------------------------------------------------------
+# 1) Create FastAPI app FIRST
+# --------------------------------------------------------
+app = FastAPI()
+
+# --------------------------------------------------------
+# 2) Add CORS middleware AFTER app exists
+# --------------------------------------------------------
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],      # allow everything or restrict to your domain
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# --------------------------------------------------------
+# 3) Models
+# --------------------------------------------------------
 class SearchPayload(BaseModel):
     keywords: str
     region: str
 
 
-app = FastAPI()
-
-
+# --------------------------------------------------------
+# 4) Simple home route to confirm backend is alive
+# --------------------------------------------------------
 @app.get("/", response_class=HTMLResponse)
 async def home():
     return """
     <html>
-    <head><title>Popfinder API</title></head>
+    <head><title>PopFinder API</title></head>
     <body style="font-family: Arial; padding: 20px;">
-        <h2>Popfinder Backend is running ✔</h2>
-        <p>This is the backend API. To explore endpoints, visit:</p>
-        <a href="/docs"><strong>/docs</strong></a>
+        <h2>PopFinder Backend is running ✔</h2>
+        <p>Visit <a href='/docs'>/docs</a> for the API explorer.</p>
     </body>
     </html>
     """
 
 
+# --------------------------------------------------------
+# 5) Search endpoint
+# --------------------------------------------------------
 @app.post("/search")
 async def search(payload: SearchPayload):
     keywords = payload.keywords
@@ -61,8 +73,7 @@ async def search(payload: SearchPayload):
             ev["url"] = url
             results.append(score_event(ev))
 
-    # Sort by score
+    # Sort events by score
     results.sort(key=lambda x: x.get("score", 0), reverse=True)
 
     return results
-
