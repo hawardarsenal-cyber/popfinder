@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from backend.ai.query_expand import generate_urls
@@ -13,6 +14,20 @@ class SearchPayload(BaseModel):
 
 
 app = FastAPI()
+
+
+@app.get("/", response_class=HTMLResponse)
+async def home():
+    return """
+    <html>
+    <head><title>Popfinder API</title></head>
+    <body style="font-family: Arial; padding: 20px;">
+        <h2>Popfinder Backend is running ✔</h2>
+        <p>This is the backend API. To explore endpoints, visit:</p>
+        <a href="/docs"><strong>/docs</strong></a>
+    </body>
+    </html>
+    """
 
 
 @app.post("/search")
