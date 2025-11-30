@@ -91,7 +91,7 @@ REQUIREMENTS:
     response = client.responses.create(
         model="gpt-4.1-mini",
         input=prompt,
-        max_output_tokens=1600
+        max_output_tokens=3000
     )
 
     # Parse output
@@ -121,3 +121,4 @@ def filter_future_events(events):
             continue
 
     return valid
+
