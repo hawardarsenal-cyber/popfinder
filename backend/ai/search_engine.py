@@ -1,11 +1,14 @@
-
 import json
+import re
 import requests
 import datetime
 from openai import OpenAI
 
 client = OpenAI()
 
+# ----------------------------------------------------
+# REMOTE FILE LOCATIONS
+# ----------------------------------------------------
 BASE_URL = "https://pos.kartingcentral.co.uk/home/download/pos2/pos2/popfinder/backend/data"
 
 RULES_URL = f"{BASE_URL}/rules.txt"
@@ -14,6 +17,9 @@ PINS_URL  = f"{BASE_URL}/pins.json"
 SEED_URL  = f"{BASE_URL}/seed_events.json"
 
 
+# ----------------------------------------------------
+# HELPERS TO LOAD REMOTE FILES
+# ----------------------------------------------------
 def load_remote(url):
     try:
         r = requests.get(url, timeout=8)
@@ -32,117 +38,189 @@ def load_json_remote(url):
         return []
 
 
-def url_seems_real(url: str) -> bool:
-    if not isinstance(url, str) or len(url) < 10:
-        return False
+# ----------------------------------------------------
+# EXTRACT EVENT DATA SECTION FROM rules.txt
+# ----------------------------------------------------
+def extract_event_data_block(rules_text: str) -> str:
+    """
+    Extract the segment between:
+    >>> BEGIN_EVENT_DATA
+    >>> END_EVENT_DATA
+    """
 
-    trusted = [
-        "excel.london", "olympia.london", "thenec.co.uk", "necgroup.co.uk",
-        "eventbrite", "kew.org", "bluewater.co.uk", "dreamland.co.uk",
-        "goodwood.com", "visitlondon.com", "mcmcomiccon.com", "ticketmaster",
-        "brighton", "harrogate"
-    ]
-    return any(t in url.lower() for t in trusted)
+    match = re.search(
+        r"BEGIN_EVENT_DATA(.*?)END_EVENT_DATA",
+        rules_text,
+        re.DOTALL | re.IGNORECASE
+    )
+    return match.group(1).strip() if match else ""
 
 
-def filter_future_and_valid(events):
-    today = datetime.date.today()
-    out = []
+# ----------------------------------------------------
+# PARSE RAW TEXT INTO EVENT OBJECTS
+# ----------------------------------------------------
+def parse_events_from_text(text: str) -> list:
+    """
+    Converts messy text into clean structured events.
+    Uses pattern recognition, URL detection, date extraction.
+    """
 
-    for ev in events:
-        try:
-            raw = ev.get("date", "")
-            first = raw.split(" ")[0]
-            date = datetime.date.fromisoformat(first)
+    if not text.strip():
+        return []
 
-            if date < today:
-                continue
+    blocks = re.split(r"\n\s*\n", text.strip())  # separate by blank lines
+    events = []
 
-            title = ev.get("title", "").lower()
-
-            banned = [
-                "gaming expo", "tech & gaming", "winter tech expo",
-                "london comics expo", "retro gaming expo"
-            ]
-            if any(b in title for b in banned):
-                continue
-
-            url = ev.get("url", "")
-            if not url_seems_real(url):
-                recur = ["festival", "market", "fair", "christmas", "county show"]
-                if not any(r in title for r in recur):
-                    continue
-
-            out.append(ev)
-        except:
+    for block in blocks:
+        lines = [l.strip() for l in block.split("\n") if l.strip()]
+        if not lines:
             continue
 
-    return out
+        title = lines[0]
+        url = ""
+        date = ""
+        location = ""
+        desc = ""
+
+        # detect URL
+        for l in lines:
+            m = re.search(r"https?://[^\s]+", l)
+            if m:
+                url = m.group(0)
+                break
+
+        # detect date-like strings
+        for l in lines:
+            if re.search(r"\d{4}|\d{1,2}\s+\w+", l):
+                date = l
+                break
+
+        # detect location-like lines
+        for l in lines:
+            if any(x in l.lower() for x in ["london", "kent", "birmingham", "manchester", "glasgow",
+                                            "brighton", "showground", "park", "centre", "hall"]):
+                location = l
+                break
+
+        # description = everything else
+        desc = " ".join(lines[1:])
+
+        # MUST have a title + something else
+        if len(title) < 3:
+            continue
+
+        events.append({
+            "title": title,
+            "date": date or "",
+            "location": location or "",
+            "description": desc or "",
+            "url": url or "",
+            "category": "",
+            "footfall_score": 0,
+            "vendor_fit_score": 0
+        })
+
+    return events
 
 
+# ----------------------------------------------------
+# VALID URL CHECK
+# ----------------------------------------------------
+def url_seems_real(url: str) -> bool:
+    if not isinstance(url, str) or len(url) < 12:
+        return False
+
+    trusted_domains = [
+        "excel.london",
+        "olympia.london",
+        "necgroup",
+        "thenec",
+        "allypally",
+        "eventbrite",
+        "bluewater",
+        "dreamland",
+        "goodwood",
+        "visitlondon",
+        "ticketmaster",
+        "brighton",
+        "harrogate",
+        "festival",
+        "gov.uk"
+    ]
+
+    return any(domain in url.lower() for domain in trusted_domains)
+
+
+# ----------------------------------------------------
+# DATE NORMALISATION & FILTERING
+# ----------------------------------------------------
+def normalize_and_validate(ev):
+    raw = ev.get("date", "").strip()
+    if not raw:
+        return None
+
+    today = datetime.date.today()
+
+    # Try ISO first
+    try:
+        iso = raw.split(" ")[0]
+        date_obj = datetime.date.fromisoformat(iso)
+        if date_obj < today:
+            return None
+        return ev
+    except:
+        pass
+
+    # Try extracting any year-month-day in text
+    m = re.search(r"(20\d{2})", raw)
+    if not m:
+        return None  # reject if no future year
+
+    return ev  # Accept as recurring or fuzzy but future
+
+
+# ----------------------------------------------------
+# MAIN SEARCH ENGINE
+# ----------------------------------------------------
 def smart_event_search(region: str, keywords: str):
 
+    # Load remote files
     rules_text = load_remote(RULES_URL)
     notes_text = load_remote(NOTES_URL)
     pins_json  = load_json_remote(PINS_URL)
     seeds_json = load_json_remote(SEED_URL)
 
-    today = datetime.date.today().isoformat()
+    # Extract event block
+    event_block = extract_event_data_block(rules_text)
+    extracted_events = parse_events_from_text(event_block)
 
-    prompt = f"""
-You are PopFinder, the UK's vendor opportunity engine.
-Return ONLY legitimate, upcoming, recurring events.
+    # Normalise & filter event data
+    cleaned = []
+    for ev in extracted_events:
+        valid = normalize_and_validate(ev)
+        if not valid:
+            continue
 
-USER QUERY:
-Region: {region}
-Keywords: {keywords}
-Today: {today}
+        # Reject hallucinated events
+        if ev["url"] and not url_seems_real(ev["url"]):
+            continue
 
-Rules:
-{rules_text}
+        cleaned.append(ev)
 
-Notes:
-{notes_text}
+    # Merge seed events
+    merged = cleaned + seeds_json
 
-Pinned Events:
-{json.dumps(pins_json)}
+    # Apply keyword boosting (soft boost only)
+    if keywords.strip():
+        kw = keywords.lower()
 
-Seed Events (verified):
-{json.dumps(seeds_json)}
+        boosted = [
+            ev for ev in merged
+            if kw in ev["title"].lower()
+            or kw in ev["description"].lower()
+        ]
 
-RULES:
-1. DO NOT invent events.
-2. Dates must be future.
-3. Use seed events as reliable ground truth.
-4. Give 12–24 events.
-5. Only use realistic URLs.
-6. ELIMINATE events if unsure of legitimacy.
+        # ensure fallback if keyword too restrictive
+        merged = boosted if boosted else merged
 
-Output ONLY JSON array of:
-{{
-  "title": "",
-  "date": "",
-  "location": "",
-  "description": "",
-  "url": "",
-  "category": "",
-  "footfall_score": 0,
-  "vendor_fit_score": 0
-}}
-"""
-
-    response = client.responses.create(
-        model="gpt-4.1-mini",
-        input=prompt,
-        max_output_tokens=3000
-    )
-
-    try:
-        raw = json.loads(response.output_text)
-    except:
-        return seeds_json
-
-    cleaned = filter_future_and_valid(raw)
-    future_seeds = filter_future_and_valid(seeds_json)
-
-    return future_seeds + cleaned
+    return merged
