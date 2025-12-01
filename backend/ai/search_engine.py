@@ -1,4 +1,3 @@
-
 import json
 import requests
 import datetime
@@ -8,7 +7,7 @@ client = OpenAI()
 
 BASE_URL = "https://pos.kartingcentral.co.uk/home/download/pos2/pos2/popfinder/backend/data"
 
-RULES_URL = f"{BASE_URL}/rules.txt"
+RULES_URL = f"{BASE_URL}/rules.txt"         # NOW treated as event list
 NOTES_URL = f"{BASE_URL}/notes.txt"
 PINS_URL  = f"{BASE_URL}/pins.json"
 SEED_URL  = f"{BASE_URL}/seed_events.json"
@@ -82,7 +81,10 @@ def filter_future_and_valid(events):
 
 def smart_event_search(region: str, keywords: str):
 
+    # THE BIG CHANGE:
+    # rules.txt now contains the EVENT LIST provided by GPT.
     rules_text = load_remote(RULES_URL)
+
     notes_text = load_remote(NOTES_URL)
     pins_json  = load_json_remote(PINS_URL)
     seeds_json = load_json_remote(SEED_URL)
@@ -90,35 +92,56 @@ def smart_event_search(region: str, keywords: str):
     today = datetime.date.today().isoformat()
 
     prompt = f"""
-You are PopFinder, the UK's vendor opportunity engine.
-Return ONLY legitimate, upcoming, recurring events.
+You are PopFinder, the UK’s event intelligence engine.
 
-USER QUERY:
+IMPORTANT:
+- The content below (rules.txt) IS THE EVENT LIST.
+- Do NOT create new events.
+- Do NOT invent URLs.
+- Do NOT guess anything.
+- ONLY use events found inside rules.txt, seed events, or pinned events.
+- You may filter, rank, reformat, and extract, but never fabricate.
+
+-------------------------
+EVENT DATA (rules.txt):
+-------------------------
+{rules_text}
+
+-------------------------
+USER CONTEXT
+-------------------------
 Region: {region}
 Keywords: {keywords}
 Today: {today}
 
-Rules:
-{rules_text}
-
-Notes:
+-------------------------
+ADDITIONAL NOTES
+-------------------------
 {notes_text}
 
-Pinned Events:
+-------------------------
+PINNED EVENTS (extra priority)
+-------------------------
 {json.dumps(pins_json)}
 
-Seed Events (verified):
+-------------------------
+SEED EVENTS (verified baseline)
+-------------------------
 {json.dumps(seeds_json)}
 
-RULES:
-1. DO NOT invent events.
-2. Dates must be future.
-3. Use seed events as reliable ground truth.
-4. Give 12–24 events.
-5. Only use realistic URLs.
-6. ELIMINATE events if unsure of legitimacy.
+-------------------------
+YOUR TASK
+-------------------------
+1. Merge events from rules.txt + pins + seed events.
+2. Filter events to match region + keyword where meaningful.
+3. Remove irrelevant, outdated, or suspicious events.
+4. Keep future dates only.
+5. Remove duplicates.
+6. ALWAYS prefer pinned events first, then seed events, then rules.txt entries.
+7. Output 12–24 events maximum.
 
-Output ONLY JSON array of:
+FORMAT:
+Return ONLY a JSON array of:
 {{
   "title": "",
   "date": "",
@@ -129,19 +152,25 @@ Output ONLY JSON array of:
   "footfall_score": 0,
   "vendor_fit_score": 0
 }}
+
+DO NOT output anything except JSON.
 """
 
+    # GPT CALL
     response = client.responses.create(
         model="gpt-4.1-mini",
         input=prompt,
-        max_output_tokens=3000
+        max_output_tokens=3500
     )
 
+    # Parse output
     try:
         raw = json.loads(response.output_text)
-    except:
-        return seeds_json
+    except Exception:
+        # fallback
+        return filter_future_and_valid(seeds_json)
 
+    # Clean
     cleaned = filter_future_and_valid(raw)
     future_seeds = filter_future_and_valid(seeds_json)
 
