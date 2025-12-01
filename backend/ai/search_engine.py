@@ -1,6 +1,3 @@
-
-
-
 import json
 import requests
 import datetime
@@ -9,7 +6,7 @@ from openai import OpenAI
 client = OpenAI()
 
 # ----------------------------------------------------
-# REMOTE FILE LOCATIONS (LIVE FTP URLS)
+# REMOTE FILE LOCATIONS (PUBLICLY ACCESSIBLE FTP URLS)
 # ----------------------------------------------------
 BASE_URL = "https://pos.kartingcentral.co.uk/home/download/pos2/pos2/popfinder/backend/data"
 
@@ -20,53 +17,107 @@ SEED_URL  = f"{BASE_URL}/seed_events.json"
 
 
 # ----------------------------------------------------
-# SAFE REMOTE LOADERS
+# HELPERS TO LOAD REMOTE FILES
 # ----------------------------------------------------
-def load_remote(url: str) -> str:
-    """Returns text from a remote file or empty string."""
+def load_remote(url):
     try:
-        r = requests.get(url, timeout=10)
+        r = requests.get(url, timeout=8)
         r.raise_for_status()
         return r.text
-    except Exception as e:
-        print(f"[PopFinder] Failed to load text from {url}: {e}")
+    except:
         return ""
 
 
-def load_json_remote(url: str):
-    """Returns JSON array/object or empty list."""
+def load_json_remote(url):
     try:
-        r = requests.get(url, timeout=10)
+        r = requests.get(url, timeout=8)
         r.raise_for_status()
         return r.json()
-    except Exception as e:
-        print(f"[PopFinder] Failed to load JSON from {url}: {e}")
+    except:
         return []
 
 
 # ----------------------------------------------------
-# FILTER PAST EVENTS
+# BASIC URL SANITY CHECK (Soft verification)
 # ----------------------------------------------------
-def filter_future_events(events):
+def url_seems_real(url: str) -> bool:
+    if not isinstance(url, str) or len(url) < 10:
+        return False
+
+    trusted_domains = [
+        "excel.london",
+        "olympia.london",
+        "thenec.co.uk",
+        "necgroup.co.uk",
+        "eventbrite",
+        "kew.org",
+        "bluewater.co.uk",
+        "dreamland.co.uk",
+        "goodwood.com",
+        "visitlondon.com",
+        "mcmcomiccon.com",
+        "festivals",
+        "gov.uk",
+        "brighton",
+        "harrogate",
+        "ticketmaster",
+    ]
+
+    return any(domain in url.lower() for domain in trusted_domains)
+
+
+# ----------------------------------------------------
+# FILTERING: KEEP ONLY FUTURE EVENTS + VALIDATE LOGIC
+# ----------------------------------------------------
+def filter_future_and_valid(events):
     today = datetime.date.today()
-    valid = []
+    out = []
 
     for ev in events:
-        raw_date = ev.get("date", "")
-        if not raw_date:
-            continue
-
         try:
-            # Only check first segment if the date is a range.
-            date_str = raw_date.split(" ")[0]
-            date_obj = datetime.date.fromisoformat(date_str)
-            if date_obj >= today:
-                valid.append(ev)
+            raw_date = ev.get("date", "")
+            first_day = raw_date.split(" ")[0]  # handle ranges
+            parsed = datetime.date.fromisoformat(first_day)
+
+            if parsed < today:
+                continue
+
+            # Soft verification:
+            # allow:
+            #  - events from seed list
+            #  - recurring events
+            #  - events with trusted URLs
+            # reject:
+            #  - expos at Olympia/Excel that don't actually exist
+            title = ev.get("title", "").lower()
+
+            # Hard block patterns known to be hallucinated
+            banned_patterns = [
+                "gaming expo",          # usually fake unless MCM includes it
+                "tech & gaming",        # fake common hallucination
+                "winter tech expo",
+                "london comics expo",   # not real (only MCM or LFCC)
+                "retro gaming expo"     # usually hallucinated
+            ]
+
+            if any(bp in title for bp in banned_patterns):
+                continue
+
+            # Trusted if URL looks legitimate
+            url = ev.get("url", "")
+
+            if not url_seems_real(url):
+                # If it looks like a recurring event, allow:
+                recurring_keywords = ["christmas", "festival", "market", "fair", "county show"]
+                if not any(k in title for k in recurring_keywords):
+                    continue
+
+            out.append(ev)
+
         except:
-            # Ignore invalid date formats silently
             continue
 
-    return valid
+    return out
 
 
 # ----------------------------------------------------
@@ -74,7 +125,6 @@ def filter_future_events(events):
 # ----------------------------------------------------
 def smart_event_search(region: str, keywords: str):
 
-    # ------------ Load remote files ------------
     rules_text = load_remote(RULES_URL)
     notes_text = load_remote(NOTES_URL)
     pins_json  = load_json_remote(PINS_URL)
@@ -82,64 +132,61 @@ def smart_event_search(region: str, keywords: str):
 
     today = datetime.date.today().isoformat()
 
-    # ------------ Build GPT prompt ------------
     prompt = f"""
-You are PopFinder, the UK's event & pop-up opportunity engine.
-
-Your task: generate *realistic, upcoming* UK events, expos, markets,
-festivals, fairs, and high-footfall vendor opportunities.
+You are PopFinder, the UK's vendor opportunity engine.
+You must return ONLY verified, legitimate, upcoming or recurring events.
 
 USER QUERY:
-- Region: {region}
-- Keywords: {keywords}
-- Today’s Date: {today}
+Region: {region}
+Keywords: {keywords}
+Today: {today}
 
-CONTEXT FROM SERVER:
---- Rules ---
-{rules_text}
+CONTEXT FILES:
+Rules: {rules_text}
+Notes: {notes_text}
+Pinned Events: {json.dumps(pins_json)}
+Seed Events (verified): {json.dumps(seeds_json)}
 
---- Notes ---
-{notes_text}
+CRITICAL RULES:
+1. DO NOT invent expos or conventions that do not exist.
+2. You MAY infer dates for recurring events (Christmas markets, seasonal fairs, county shows).
+3. You MUST prioritise real venues (ExCeL, Olympia, NEC, Ally Pally, Kent Showground, Bluewater).
+4. Only provide URLs that belong to real event websites.
+5. If unsure about an event's legitimacy → DO NOT INCLUDE IT.
+6. Use seed events as factual ground truth referencing patterns.
+7. Provide 12–24 events total.
+8. All dates must be future dates.
 
---- Pinned Events ---
-{json.dumps(pins_json)}
-
---- Seed Events (verified sources) ---
-{json.dumps(seeds_json)}
-
-REQUIREMENTS:
-1. ALL events must have dates *after today*.
-2. Include real venues such as ExCeL London, Olympia, NEC, Bluewater,
-   Alexandra Palace, Southbank, Kent Showground, etc.
-3. Use seed events to anchor realism — DO NOT contradict them.
-4. You may infer dates only if needed, and must keep them plausible.
-5. If keywords provided, boost but do not restrict.
-6. Return **ONLY a JSON ARRAY** of objects in this exact structure:
-
+Event structure MUST be JSON only:
 [
   {{
     "title": "",
     "date": "",
     "location": "",
     "description": "",
-    "url": ""
+    "url": "",
+    "category": "",
+    "footfall_score": 0,
+    "vendor_fit_score": 0
   }}
 ]
 """
 
-    # ------------ GPT Call ------------
     response = client.responses.create(
         model="gpt-4.1-mini",
         input=prompt,
-        max_output_tokens=2500
+        max_output_tokens=3000
     )
 
-    # ------------ Parse JSON Output ------------
     try:
-        result = json.loads(response.output_text)
-    except Exception as e:
-        print("[PopFinder] GPT output was not valid JSON:", e)
-        return seeds_json  # fallback to seed events
+        raw = json.loads(response.output_text)
+    except:
+        return seeds_json  # fallback
 
-    # ------------ Filter past events ------------
-    return filter_future_events(result)
+    cleaned = filter_future_and_valid(raw)
+
+    # Merge seed events (future only)
+    future_seeds = filter_future_and_valid(seeds_json)
+
+    return future_seeds + cleaned
+
