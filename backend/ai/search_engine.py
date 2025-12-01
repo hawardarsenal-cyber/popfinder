@@ -212,7 +212,7 @@ NO text outside JSON.
     response = client.responses.create(
         model="gpt-4.1-mini",
         input=prompt,
-        max_output_tokens=3500
+        max_output_tokens=5000
     )
 
     # ===========================================================
@@ -251,3 +251,4 @@ NO text outside JSON.
         final.append(ev)
 
     return final
+
