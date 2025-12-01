@@ -136,7 +136,9 @@ def smart_event_search(region: str, keywords: str):
     """
 
     # Load remote configuration / data
-    rules_text = load_remote(RULES_URL)   # contains SYSTEM RULES + EVENT DATA
+    full_rules = load_remote(RULES_URL)
+event_data = extract_event_data(full_rules)
+   # contains SYSTEM RULES + EVENT DATA
     notes_text = load_remote(NOTES_URL)   # still available if you want to use it later
     pins_json  = load_json_remote(PINS_URL)
     seeds_json = load_json_remote(SEED_URL)
@@ -225,7 +227,7 @@ DATA YOU MUST READ
 
 rules.txt (SYSTEM RULES + EVENT DATA):
 <<<RULES_TXT_START
-{rules_text}
+{event_data}
 RULES_TXT_END>>>
 
 Pinned Events (JSON):
@@ -292,4 +294,5 @@ Today: {today}
         unique.append(ev)
 
     return unique
+
 
